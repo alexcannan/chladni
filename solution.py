@@ -12,9 +12,9 @@ L = 1  # plate size x
 M = 1  # plate size y
 gamma = 0.1  # damping
 v = 1  # transverse speed
-s_0 = 0.1  # source amplitude
-s_w = 10  # source frequency
-max_sum = 5  # number of terms in the series
+s_0 = 0.2  # source amplitude
+s_w = 54  # source frequency
+max_sum = 20  # number of terms in the series
 
 
 def mu_n(n):
@@ -62,4 +62,4 @@ def frame(t):
 
 
 if __name__ == "__main__":
-    frame(0.1)
+    frame(10)
