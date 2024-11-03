@@ -1,2 +1,2 @@
-# helmholtz
+# chladni
 chladni figure simulation
