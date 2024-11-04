@@ -1,23 +1,19 @@
-"""
-Chladni figure implementation based on [1].
-
-[1]: https://www.et.byu.edu/~vps/ME505/AAEM/V10-14.pdf
-"""
-
 from functools import lru_cache
+import math
 
-import numpy as np
 import matplotlib.pyplot as plt
+from numba import cuda
+import numpy as np
 
 
-L = 1  # plate size x
-M = 1  # plate size y
-gamma = 0.1  # damping
-v = 1  # transverse speed
-s_0 = 0.2  # source amplitude
-s_w = 54  # source frequency
-max_sum = 20  # number of terms in the series
-resolution = 200  # number of samples in each dimension
+L = 1
+M = 1
+gamma = 0.1
+v = 1
+s_0 = 0.2
+s_w = 54
+max_sum = 20
+resolution = 300
 
 
 @lru_cache
@@ -40,16 +36,21 @@ def phi(n, m):
     return s_0 * np.cos(mu_n(n) * (L / 2)) * np.cos(lambda_m(m) * (M / 2))
 
 
-def u_n_m(n, m, t):
-    return ((v**2 * phi(n, m)) / beta(n, m)) * np.sin(s_w * t) * np.exp(-gamma**2 * v**2 * t) * np.sin(beta(n, m) * t)
-
-
-def u(x, y, t):
-    return (4 / (L*M)) * np.sum([
-        u_n_m(n, m, t) * np.cos(mu_n(n) * x) * np.cos(lambda_m(m) * y)
-        for n in range(1, max_sum)
-        for m in range(1, max_sum)
-    ])
+@cuda.jit
+def compute_u(U, t, x_vals, y_vals, mu_n_vals, lambda_m_vals, beta_vals, phi_vals):
+    i, j = cuda.grid(2)
+    if i < U.shape[0] and j < U.shape[1]:
+        x = x_vals[i]
+        y = y_vals[j]
+        u_sum = 0.0
+        for n in range(1, max_sum):
+            for m in range(1, max_sum):
+                beta_nm = beta_vals[n, m]
+                phi_nm = phi_vals[n, m]
+                term = ((v**2 * phi_nm) / beta_nm) * np.sin(s_w * t) * math.exp(-gamma**2 * v**2 * t)
+                term *= np.sin(beta_nm * t) * np.cos(mu_n_vals[n] * x) * np.cos(lambda_m_vals[m] * y)
+                u_sum += term
+        U[i, j] = (4 / (L * M)) * u_sum
 
 
 def frame(t):
@@ -57,21 +58,44 @@ def frame(t):
     y = np.linspace(0, M, resolution)
     X, Y = np.meshgrid(x, y)
 
-    U = np.vectorize(u)(X, Y, t)
+    U = np.zeros((resolution, resolution), dtype=np.float32)
 
+    # Precompute values
+    mu_n_vals = np.array([mu_n(n) for n in range(max_sum)], dtype=np.float32)
+    lambda_m_vals = np.array([lambda_m(m) for m in range(max_sum)], dtype=np.float32)
+    beta_vals = np.array([[beta(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
+    phi_vals = np.array([[phi(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
+
+    # Copy data to GPU
+    U_device = cuda.to_device(U)
+    x_vals_device = cuda.to_device(x)
+    y_vals_device = cuda.to_device(y)
+    mu_n_vals_device = cuda.to_device(mu_n_vals)
+    lambda_m_vals_device = cuda.to_device(lambda_m_vals)
+    beta_vals_device = cuda.to_device(beta_vals)
+    phi_vals_device = cuda.to_device(phi_vals)
+
+    # Launch kernel
+    threadsperblock = (16, 16)
+    blockspergrid_x = (U.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
+    blockspergrid_y = (U.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
+    compute_u[(blockspergrid_x, blockspergrid_y), threadsperblock](
+        U_device, t, x_vals_device, y_vals_device, mu_n_vals_device, lambda_m_vals_device, beta_vals_device, phi_vals_device
+    )
+
+    # Copy result back to host
+    U = U_device.copy_to_host()
+
+    # Plotting
     plt.figure(figsize=(8, 6))
-
     contourf_plot = plt.contourf(X, Y, U, levels=50, cmap='viridis')
     plt.colorbar(contourf_plot, label="Displacement (u)")
-
-    _zero_crossings = plt.contour(X, Y, U, levels=[0], colors='white', linewidths=1.5)
+    _zero_crossings = plt.contour(X, Y, U, levels=[0], colors='white')
 
     plt.xlabel("x")
     plt.ylabel("y")
     plt.title(f"Standing Wave Displacement Gradient at t={t}")
     plt.show()
 
-
-
 if __name__ == "__main__":
-    frame(10)
+    frame(1000)
