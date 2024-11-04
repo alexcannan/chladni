@@ -13,8 +13,8 @@ gamma = 0.1
 v = 1
 s_0 = 0.2
 s_w = 54
-max_sum = 30
-resolution = 500
+max_sum = 60
+resolution = 300
 
 
 @lru_cache
@@ -61,13 +61,11 @@ def frame(t):
 
     U = np.zeros((resolution, resolution), dtype=np.float32)
 
-    # Precompute values
     mu_n_vals = np.array([mu_n(n) for n in range(max_sum)], dtype=np.float32)
     lambda_m_vals = np.array([lambda_m(m) for m in range(max_sum)], dtype=np.float32)
     beta_vals = np.array([[beta(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
     phi_vals = np.array([[phi(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
 
-    # Copy data to GPU
     U_device = cuda.to_device(U)
     x_vals_device = cuda.to_device(x)
     y_vals_device = cuda.to_device(y)
@@ -76,7 +74,6 @@ def frame(t):
     beta_vals_device = cuda.to_device(beta_vals)
     phi_vals_device = cuda.to_device(phi_vals)
 
-    # Launch kernel
     threadsperblock = (16, 16)
     blockspergrid_x = (U.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
     blockspergrid_y = (U.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
@@ -84,10 +81,8 @@ def frame(t):
         U_device, t, x_vals_device, y_vals_device, mu_n_vals_device, lambda_m_vals_device, beta_vals_device, phi_vals_device
     )
 
-    # Copy result back to host
     U = U_device.copy_to_host()
 
-    # Plotting
     plt.figure(figsize=(8, 6))
     contourf_plot = plt.contourf(X, Y, U, levels=50, cmap='viridis')
     plt.colorbar(contourf_plot, label="Displacement (u)")
@@ -106,13 +101,11 @@ def anim():
 
     U = np.zeros((resolution, resolution), dtype=np.float32)
 
-    # Precompute values
     mu_n_vals = np.array([mu_n(n) for n in range(max_sum)], dtype=np.float32)
     lambda_m_vals = np.array([lambda_m(m) for m in range(max_sum)], dtype=np.float32)
     beta_vals = np.array([[beta(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
     phi_vals = np.array([[phi(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
 
-    # Copy data to GPU
     U_device = cuda.to_device(U)
     x_vals_device = cuda.to_device(x)
     y_vals_device = cuda.to_device(y)
@@ -121,14 +114,12 @@ def anim():
     beta_vals_device = cuda.to_device(beta_vals)
     phi_vals_device = cuda.to_device(phi_vals)
 
-    # Set up the figure and plot
-    fig, ax = plt.subplots(figsize=(8, 6))
-    contourf_plot = ax.contourf(X, Y, U, levels=50, cmap='viridis')
-    plt.colorbar(contourf_plot, ax=ax, label="Displacement (u)")
-    _zero_crossings = ax.contour(X, Y, U, levels=[0], colors='white')
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title("Standing Wave Displacement Gradient")
+    fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
+    ax.axis("off")
+    U = np.zeros((resolution, resolution), dtype=np.float32)
+    _contour = ax.contourf(X, Y, U, levels=50, cmap="viridis")
+    _zero_crossings = ax.contour(X, Y, U, levels=[0], colors="white")
+
 
     def update(t):
         print(t)
@@ -143,13 +134,14 @@ def anim():
         U[:] = U_device.copy_to_host()
 
         ax.clear()
-        contourf_plot = ax.contourf(X, Y, U, levels=50, cmap='viridis')
-        _zero_crossings = ax.contour(X, Y, U, levels=[0], colors='white')
-        return contourf_plot.collections
+        contour = ax.contourf(X, Y, U, levels=50, cmap="viridis")
+        _zero_crossings = ax.contour(X, Y, U, levels=[0], colors="white")
+        # print(U.shape, np.max(U))
+        return [contour]
 
     # Create the animation
-    anim = FuncAnimation(fig, update, frames=np.linspace(0, 5, 400), blit=True)
-    plt.show()
+    anim = FuncAnimation(fig, update, frames=np.linspace(0, 20, 2001), blit=True)
+    anim.save("wave.mp4", fps=15, writer="ffmpeg")
 
 
 if __name__ == "__main__":
