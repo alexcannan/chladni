@@ -1,6 +1,7 @@
 from functools import lru_cache
 import math
 
+from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 from numba import cuda
 import numpy as np
@@ -12,8 +13,8 @@ gamma = 0.1
 v = 1
 s_0 = 0.2
 s_w = 54
-max_sum = 20
-resolution = 300
+max_sum = 30
+resolution = 500
 
 
 @lru_cache
@@ -97,5 +98,60 @@ def frame(t):
     plt.title(f"Standing Wave Displacement Gradient at t={t}")
     plt.show()
 
+
+def anim():
+    x = np.linspace(0, L, resolution)
+    y = np.linspace(0, M, resolution)
+    X, Y = np.meshgrid(x, y)
+
+    U = np.zeros((resolution, resolution), dtype=np.float32)
+
+    # Precompute values
+    mu_n_vals = np.array([mu_n(n) for n in range(max_sum)], dtype=np.float32)
+    lambda_m_vals = np.array([lambda_m(m) for m in range(max_sum)], dtype=np.float32)
+    beta_vals = np.array([[beta(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
+    phi_vals = np.array([[phi(n, m) for m in range(max_sum)] for n in range(max_sum)], dtype=np.float32)
+
+    # Copy data to GPU
+    U_device = cuda.to_device(U)
+    x_vals_device = cuda.to_device(x)
+    y_vals_device = cuda.to_device(y)
+    mu_n_vals_device = cuda.to_device(mu_n_vals)
+    lambda_m_vals_device = cuda.to_device(lambda_m_vals)
+    beta_vals_device = cuda.to_device(beta_vals)
+    phi_vals_device = cuda.to_device(phi_vals)
+
+    # Set up the figure and plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+    contourf_plot = ax.contourf(X, Y, U, levels=50, cmap='viridis')
+    plt.colorbar(contourf_plot, ax=ax, label="Displacement (u)")
+    _zero_crossings = ax.contour(X, Y, U, levels=[0], colors='white')
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Standing Wave Displacement Gradient")
+
+    def update(t):
+        print(t)
+        threadsperblock = (8, 8)
+        blockspergrid_x = (U.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (U.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
+        compute_u[(blockspergrid_x, blockspergrid_y), threadsperblock](
+            U_device, t, x_vals_device, y_vals_device, mu_n_vals_device, lambda_m_vals_device, beta_vals_device, phi_vals_device
+        )
+
+        # Copy result back to host
+        U[:] = U_device.copy_to_host()
+
+        ax.clear()
+        contourf_plot = ax.contourf(X, Y, U, levels=50, cmap='viridis')
+        _zero_crossings = ax.contour(X, Y, U, levels=[0], colors='white')
+        return contourf_plot.collections
+
+    # Create the animation
+    anim = FuncAnimation(fig, update, frames=np.linspace(0, 5, 400), blit=True)
+    plt.show()
+
+
 if __name__ == "__main__":
-    frame(1000)
+    # frame(1000)
+    anim()
